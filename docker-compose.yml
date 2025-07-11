@@ -1,0 +1,189 @@
+version: '3.8'
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - 22181:2181
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      - zookeeper
+    ports:
+      - 29092:29092
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+
+  # Simple topic setup - runs once and exits
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      - kafka
+    command: |
+      bash -c "
+        echo 'Waiting for Kafka...'
+        sleep 10
+        
+        echo 'Creating topics...'
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic bf_employee_cdc
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic bf_employee_cdc_dlq
+        
+        echo 'Topics created!'
+        kafka-topics --list --bootstrap-server kafka:9092
+      "
+    restart: "no"
+
+  db_source:
+    image: postgres:14.1-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=source
+      - POSTGRES_PASSWORD=source
+    ports:
+      - '5432:5432'
+    volumes:
+      - db_source:/var/lib/bf_kafka_proj2_source/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "source", "-d", "source"]
+      interval: 5s
+      timeout: 2s
+      retries: 60
+
+  db_destination:
+    image: postgres:14.1-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=destination
+      - POSTGRES_PASSWORD=destination
+    ports:
+      - '5433:5432'
+    volumes:
+      - db_dst:/var/lib/bf_kafka_proj2_dst/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "destination", "-d", "destination"]
+      interval: 5s
+      timeout: 2s
+      retries: 60
+  
+  producer:
+    build: .
+    depends_on:
+      kafka:
+        condition: service_started
+      db_source:
+        condition: service_healthy
+
+    volumes:
+      - ./:/app
+    working_dir: /app
+    environment:
+      KAFKA_HOST: kafka
+      KAFKA_PORT: 9092
+      DB_HOST: db_source
+      DB_PORT: 5432
+      DB_NAME: source
+      DB_USER: source
+      DB_PASSWORD: source
+      PYTHONUNBUFFERED: '1'
+    command: >
+      bash -c "python3 producer.py"
+    restart: on-failure
+
+  consumer:
+    build: .
+    depends_on:
+      kafka:
+        condition: service_started
+      kafka-setup:
+        condition: service_completed_successfully
+      db_destination:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+    working_dir: /app
+    environment:
+      KAFKA_HOST: kafka
+      KAFKA_PORT: 9092
+      DB_HOST: db_destination
+      DB_PORT: 5432
+      DB_NAME: destination
+      DB_USER: destination
+      DB_PASSWORD: destination
+      PYTHONUNBUFFERED: '1'
+    command: >
+      bash -c "python3 consumer.py"
+    restart: on-failure
+
+  postgres_airflow:
+    image: postgres:14.1-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    ports:
+      - "5434:5432"
+    volumes:
+      - airflow_db:/var/lib/bf_kafka_proj2_airflow/data
+
+  airflow-init:
+    image: apache/airflow:2.7.1
+    depends_on:
+      postgres_airflow:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@postgres_airflow:5432/airflow"
+    entrypoint: >
+      bash -c "airflow db init && airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin"
+  airflow:
+    image: apache/airflow:2.7.1
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres_airflow:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      db_source:
+        condition: service_started
+      db_destination:
+        condition: service_started
+    environment:
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'False'
+      # make your source+dest DBs available as Airflow connections
+      AIRFLOW_CONN_SOURCE_DB: postgresql://source:source@db_source:5432/source
+      AIRFLOW_CONN_DEST_DB: postgresql://destination:destination@db_destination:5432/destination
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "airflow scheduler &
+               airflow webserver"
+    restart: always
+
+volumes:
+  db_source:
+    driver: local
+  db_dst:
+    driver: local
+  airflow_db:
+    driver: local
