@@ -1,0 +1,6 @@
+__pycache__/
+.git
+logs/
+venv/
+plugins/
+.DS_Store

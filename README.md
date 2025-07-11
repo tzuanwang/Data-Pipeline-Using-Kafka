@@ -1,7 +1,9 @@
 # Create a Data Pipeline Using Kafka
-## Capture the changing data
-* Create a data tunnel to maintain a sync between tables in source and destination databases
-* The stream processing would be responsible for:
-    * Snapshot processing => Reading all the records from source database => send them asynchronously to destination databse
-    * Stream processing => Once a snapshot has been synchronized, stream processing will keep looking for the new changes
-* Insert/Delete/Update => Any changes on source table should be reflected in destination table less than 1 sec
+### Overview
+**Project Goal**: The goal of this project is to create a data tunnel to maintain a sync between tables in source and destination databases. Any changes on the source table will be reflected in destination table less than 1 sec.
+
+This project uses **PostgreSQL** as source and destination databases and **Apache Kafka** as the message queue to capture all the changes. Additionally, we will use **Apache Airflow** to schedule the producer, consumer, and all the validation steps.
+
+### Content
+The project contains the following:
+
