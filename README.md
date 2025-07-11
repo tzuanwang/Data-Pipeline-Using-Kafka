@@ -34,6 +34,21 @@ docker ps
 Wait until **airflow** service is running. The service will start and be accessible at `http://localhost:8080/login`
 
 ### Activate the DAG and Trigger
-
+![trigger-airflow](screenshots/trigger-airflow.png)
+![airflow-done](screenshots/airflow-done.png)
 ### Examine the Result
+* Check the **employee_a** table in source database:
+
+![source-table](screenshots/source-table.png)
+
+---
+* Check the **emp_cdc** table in source database:
+
+![cdc-table](screenshots/cdc-table.png)
+
+---
+* Check the **employee_b** table in destination database:
+
+![destination-table](screenshots/destination-table.png)
+
 

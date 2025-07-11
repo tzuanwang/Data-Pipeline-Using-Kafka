@@ -6,3 +6,4 @@ logs/
 venv/
 plugins/
 .DS_Store
+screenshots/
