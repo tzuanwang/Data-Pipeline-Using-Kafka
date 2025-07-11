@@ -42,8 +42,6 @@ DB_PASSWORD   = os.getenv('DB_PASSWORD','source')
 employee_topic_name = "bf_employee_cdc"
 
 class cdcProducer(Producer):
-    #if running outside Docker (i.e. producer is NOT in the docer-compose file): host = localhost and port = 29092
-    #if running inside Docker (i.e. producer IS IN the docer-compose file), host = 'kafka' or whatever name used for the kafka container, port = 9092
     def __init__(self):
         super().__init__({
             'bootstrap.servers': f'{KAFKA_HOST}:{KAFKA_PORT}',
